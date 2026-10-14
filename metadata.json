@@ -1,0 +1,8 @@
+{
+  "name": "نظام حجز مواعيد غرفة مصادر التعلم",
+  "description": "نظام إلكتروني متكامل لحجز مواعيد غرفة مصادر التعلم للمعلمين بإشراف أمينة المصادر أ. عواطف البهلال.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
