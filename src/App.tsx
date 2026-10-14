@@ -103,7 +103,7 @@ function AppContent() {
     // Sync count with server
     fetchBookingsFromServer().then((data) => {
       if (Array.isArray(data)) setBookingCount(data.length);
-    });
+    }).catch(() => setBookingCount(0));
 
     const handleUpdate = () => {
       setBookingCount(getStoredBookings().length);

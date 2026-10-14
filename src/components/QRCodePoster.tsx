@@ -30,10 +30,14 @@ export default function QRCodePoster() {
   const { settings, saveSettings, isSaving } = useSchoolSettings();
 
   const getInitialBookingUrl = () => {
-    if (typeof window !== 'undefined' && window.location.origin && window.location.origin.includes('netlify.app')) {
-      return `${window.location.origin}/#book`;
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('qr_custom_booking_url');
+      if (stored) return stored;
+      if (window.location.origin && window.location.origin.includes('netlify.app')) {
+        return `${window.location.origin}/#book`;
+      }
     }
-    return `https://school-msader.netlify.app/#book`;
+    return PERMANENT_PRODUCTION_URL;
   };
 
   const [bookingUrl, setBookingUrl] = useState<string>(getInitialBookingUrl);

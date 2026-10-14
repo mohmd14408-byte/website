@@ -124,12 +124,12 @@ export default function BookingForm({
   useEffect(() => {
     fetchBookingsFromServer().then((data) => {
       if (Array.isArray(data)) setAllBookings(data);
-    });
+    }).catch(() => setAllBookings([]));
 
     const pollInterval = setInterval(() => {
       fetchBookingsFromServer().then((data) => {
         if (Array.isArray(data)) setAllBookings(data);
-      });
+      }).catch(() => setAllBookings([]));
     }, 6000);
 
     const handleUpdate = () => {

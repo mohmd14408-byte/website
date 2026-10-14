@@ -2,7 +2,6 @@ import { Booking, StudentUser, BookingStatus } from '../types/booking';
 
 const STORAGE_KEY = 'resource_room_bookings_v2';
 const USER_KEY = 'resource_room_student_user_v1';
-const CLOUD_CONFIG_KEY = 'resource_room_cloud_config_v1';
 
 export const DEFAULT_CLOUD_INDEX_ID = 'local-server-sync';
 export const CLOUD_API_BASE = '/api/bookings';
@@ -15,7 +14,7 @@ export interface CloudSyncStatus {
 }
 
 let currentCloudStatus: CloudSyncStatus = {
-  isConnected: true,
+  isConnected: false,
   lastSyncTime: null,
   cloudId: DEFAULT_CLOUD_INDEX_ID,
   error: null,
@@ -91,7 +90,8 @@ export function setCustomCloudIndexId(_id: string) {
   // no-op for server-backed storage
 }
 
-// Fetch all bookings from Server Backend
+// Fetch shared bookings from the server. Never treat this device's local cache
+// as shared data when the server is unavailable.
 export async function fetchBookingsFromServer(): Promise<Booking[]> {
   try {
     const res = await fetch('/api/bookings', { credentials: 'omit' });
@@ -108,18 +108,18 @@ export async function fetchBookingsFromServer(): Promise<Booking[]> {
       });
       return serverBookings;
     }
-    return getStoredBookings();
+    throw new Error('رد الخادم ببيانات حجوزات غير صالحة');
   } catch (err: any) {
-    console.warn('Server sync warning, using local cache:', err);
+    console.warn('Server sync failed:', err);
     updateCloudStatus({
       isConnected: false,
       error: err?.message || 'تعذر الاتصال بالخادم',
     });
-    return getStoredBookings();
+    throw err;
   }
 }
 
-// Save booking to Server Backend and local cache
+// Save booking to the shared server before showing success to the user.
 export async function saveBookingAsync(
   newBooking: Omit<Booking, 'id' | 'createdAt' | 'ticketNumber' | 'status'>
 ): Promise<Booking> {
@@ -143,58 +143,20 @@ export async function saveBookingAsync(
       const local = getStoredBookings().filter((b) => b.id !== created.id);
       setLocalBookings([created, ...local]);
       return created;
-    } else {
-      throw new Error('فشل حفظ الحجز في الخادم');
     }
+    throw new Error(`تعذر حفظ الحجز في الخادم (HTTP ${res.status})`);
   } catch (err: any) {
-    console.warn('Server save error, caching locally:', err);
+    console.warn('Server save failed:', err);
     updateCloudStatus({
       isConnected: false,
       error: err?.message || 'تعذر حفظ الحجز',
     });
-
-    // Fallback local save
-    const ticketNumber = generateTicketNumber();
-    const created: Booking = {
-      ...newBooking,
-      id: Date.now(),
-      ticketNumber,
-      status: 'confirmed',
-      createdAt: new Date().toISOString(),
-    };
-    const local = getStoredBookings();
-    setLocalBookings([created, ...local]);
-    return created;
+    throw err;
   }
-}
-
-// Synchronous wrapper
-export function saveBooking(
-  newBooking: Omit<Booking, 'id' | 'createdAt' | 'ticketNumber' | 'status'>
-): Booking {
-  saveBookingAsync(newBooking).catch((e) => console.warn('Background save error:', e));
-
-  const ticketNumber = generateTicketNumber();
-  const created: Booking = {
-    ...newBooking,
-    id: Date.now(),
-    ticketNumber,
-    status: 'confirmed',
-    createdAt: new Date().toISOString(),
-  };
-
-  const local = getStoredBookings();
-  setLocalBookings([created, ...local]);
-  return created;
 }
 
 // Update booking status on Server Backend
 export async function updateBookingStatusAsync(id: string | number, status: BookingStatus): Promise<void> {
-  // Update local cache immediately
-  const local = getStoredBookings();
-  const updated = local.map((b) => (b.id === id ? { ...b, status } : b));
-  setLocalBookings(updated);
-
   try {
     const res = await fetch(`/api/bookings/${id}`, {
       method: 'PUT',
@@ -202,14 +164,18 @@ export async function updateBookingStatusAsync(id: string | number, status: Book
       body: JSON.stringify({ status }),
       credentials: 'omit',
     });
-    if (res.ok) {
-      updateCloudStatus({
-        isConnected: true,
-        lastSyncTime: new Date().toLocaleTimeString('ar-SA'),
-      });
-    }
-  } catch (err) {
-    console.warn('Server status update notice:', err);
+    if (!res.ok) throw new Error(`تعذر تحديث الحجز (HTTP ${res.status})`);
+    const local = getStoredBookings().map((b) => (String(b.id) === String(id) ? { ...b, status } : b));
+    setLocalBookings(local);
+    updateCloudStatus({
+      isConnected: true,
+      lastSyncTime: new Date().toLocaleTimeString('ar-SA'),
+      error: null,
+    });
+  } catch (err: any) {
+    console.warn('Server status update failed:', err);
+    updateCloudStatus({ isConnected: false, error: err?.message || 'تعذر تحديث الحجز' });
+    throw err;
   }
 }
 
@@ -219,17 +185,20 @@ export function updateBookingStatus(id: string | number, status: BookingStatus):
 
 // Delete booking from Server Backend
 export async function deleteBookingAsync(id: string | number): Promise<void> {
-  const local = getStoredBookings().filter((b) => b.id !== id);
-  setLocalBookings(local);
-
   try {
-    await fetch(`/api/bookings/${id}`, { method: 'DELETE', credentials: 'omit' });
+    const res = await fetch(`/api/bookings/${id}`, { method: 'DELETE', credentials: 'omit' });
+    if (!res.ok) throw new Error(`تعذر حذف الحجز (HTTP ${res.status})`);
+    const local = getStoredBookings().filter((b) => String(b.id) !== String(id));
+    setLocalBookings(local);
     updateCloudStatus({
       isConnected: true,
       lastSyncTime: new Date().toLocaleTimeString('ar-SA'),
+      error: null,
     });
-  } catch (err) {
-    console.warn('Server delete notice:', err);
+  } catch (err: any) {
+    console.warn('Server delete failed:', err);
+    updateCloudStatus({ isConnected: false, error: err?.message || 'تعذر حذف الحجز' });
+    throw err;
   }
 }
 
@@ -239,15 +208,19 @@ export function deleteBooking(id: string | number): void {
 
 // Reset bookings
 export async function resetToSeedAsync(): Promise<void> {
-  setLocalBookings(INITIAL_SEED_BOOKINGS);
   try {
-    await fetch('/api/bookings/reset', { method: 'POST', credentials: 'omit' });
+    const res = await fetch('/api/bookings/reset', { method: 'POST', credentials: 'omit' });
+    if (!res.ok) throw new Error(`تعذر مسح الحجوزات (HTTP ${res.status})`);
+    setLocalBookings(INITIAL_SEED_BOOKINGS);
     updateCloudStatus({
       isConnected: true,
       lastSyncTime: new Date().toLocaleTimeString('ar-SA'),
+      error: null,
     });
-  } catch (err) {
-    console.warn('Server reset notice:', err);
+  } catch (err: any) {
+    console.warn('Server reset failed:', err);
+    updateCloudStatus({ isConnected: false, error: err?.message || 'تعذر مسح الحجوزات' });
+    throw err;
   }
 }
 

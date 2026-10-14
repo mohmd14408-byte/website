@@ -166,6 +166,7 @@ export default function AdminDashboard({ onRefreshData }: AdminDashboardProps) {
       if (onRefreshData) onRefreshData();
     } catch (e) {
       console.warn('Refresh error:', e);
+      setBookings([]);
     } finally {
       setIsLoading(false);
     }
@@ -178,9 +179,11 @@ export default function AdminDashboard({ onRefreshData }: AdminDashboardProps) {
 
     // Auto-poll every 3 seconds for live cross-device sync
     const interval = setInterval(async () => {
-      const fresh = await fetchBookingsFromServer();
-      if (Array.isArray(fresh)) {
-        setBookings(fresh);
+      try {
+        const fresh = await fetchBookingsFromServer();
+        if (Array.isArray(fresh)) setBookings(fresh);
+      } catch {
+        setBookings([]);
       }
     }, 3000);
 
@@ -202,33 +205,41 @@ export default function AdminDashboard({ onRefreshData }: AdminDashboardProps) {
   }, []);
 
   const handleStatusChange = async (id: string | number, newStatus: BookingStatus) => {
-    await updateBookingStatusAsync(id, newStatus);
-    refreshList();
-    toast({
-      title: 'تم تحديث حالة الحجز',
-      description: `تم تغيير الحالة إلى: ${
-        newStatus === 'attended'
-          ? 'تم الحضور في القاعة'
-          : newStatus === 'cancelled'
-          ? 'ملغي'
-          : newStatus === 'absent'
-          ? 'تغيب عن الحضور'
-          : 'مؤكد'
-      }`,
-      variant: 'success',
-    });
+    try {
+      await updateBookingStatusAsync(id, newStatus);
+      await refreshList();
+      toast({
+        title: 'تم تحديث حالة الحجز',
+        description: `تم تغيير الحالة إلى: ${
+          newStatus === 'attended'
+            ? 'تم الحضور في القاعة'
+            : newStatus === 'cancelled'
+            ? 'ملغي'
+            : newStatus === 'absent'
+            ? 'تغيب عن الحضور'
+            : 'مؤكد'
+        }`,
+        variant: 'success',
+      });
+    } catch {
+      toast({ title: 'تعذر تحديث الحجز', description: 'تحقق من اتصال الخادم ثم أعد المحاولة.', variant: 'destructive' });
+    }
   };
 
 
 
   const handleResetData = async () => {
-    await resetToSeedAsync();
-    refreshList();
-    toast({
-      title: 'تمت استعادة السجلات الافتراضية',
-      description: 'تمت استعادة البيانات التجريبية بنجاح.',
-      variant: 'info',
-    });
+    try {
+      await resetToSeedAsync();
+      await refreshList();
+      toast({
+        title: 'تمت استعادة السجلات الافتراضية',
+        description: 'تمت استعادة البيانات التجريبية بنجاح.',
+        variant: 'info',
+      });
+    } catch {
+      toast({ title: 'تعذر مسح الحجوزات', description: 'تحقق من اتصال الخادم ثم أعد المحاولة.', variant: 'destructive' });
+    }
   };
 
   // Quick action: Add test booking to verify cross-device sync
@@ -380,7 +391,9 @@ export default function AdminDashboard({ onRefreshData }: AdminDashboardProps) {
             <div className="flex flex-wrap items-center gap-2 pt-1">
               <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 text-xs font-bold border border-emerald-400/30">
                 <span className={`w-2 h-2 rounded-full ${cloudStatus.isConnected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
-                {cloudStatus.isConnected ? 'قاعدة البيانات السحابية العامة: متصلة ومتزامنة فورياً' : 'جاري إعادة الاتصال بالسحابة...'}
+                {cloudStatus.isConnected
+                  ? 'الخادم المشترك متصل؛ الحجوزات تظهر على الأجهزة الأخرى'
+                  : 'الخادم المشترك غير متصل؛ لن تُحفظ الحجوزات أو تظهر للأجهزة الأخرى'}
               </span>
               {cloudStatus.lastSyncTime && (
                 <span className="text-emerald-200/80 text-[11px] font-medium">
